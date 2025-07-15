@@ -1,1 +1,266 @@
-# businesses-app
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Business App</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
+    .container { max-width: 500px; margin: auto; padding: 20px; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-top: 30px; }
+    h2, h3 { text-align: center; }
+    button, input, select { padding: 10px; width: 100%; margin: 5px 0; border-radius: 6px; border: 1px solid #ccc; }
+    .hidden { display: none; }
+    .lang-switch { text-align: right; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="lang-switch">
+      <select id="langSelect">
+        <option value="en">English</option>
+        <option value="te">తెలుగు</option>
+      </select>
+    </div>
+
+    <div id="loginSection">
+      <h2 id="loginTitle">Login with Phone</h2>
+      <input type="tel" id="phoneInput" placeholder="Enter Phone Number">
+      <div id="recaptcha-container"></div>
+      <button onclick="sendOTP()">Send OTP</button>
+      <input type="text" id="otpInput" class="hidden" placeholder="Enter OTP">
+      <button id="verifyBtn" class="hidden" onclick="verifyOTP()">Verify OTP</button>
+    </div>
+
+    <div id="roleSection" class="hidden">
+      <h3>Select Role</h3>
+      <button onclick="selectRole('admin')">Admin</button>
+      <button onclick="selectRole('customer')">Customer</button>
+    </div>
+
+    <div id="unitJoinSection" class="hidden">
+      <h3>Join or Create a Unit</h3>
+      <input type="text" id="unitCode" placeholder="Enter Unit Code (to join)">
+      <button onclick="joinUnit()">Join Unit</button>
+      <button onclick="createUnit()">Create New Unit</button>
+    </div>
+
+    <div id="adminPanel" class="hidden">
+      <h3>Admin Panel</h3>
+      <input type="text" id="newProduct" placeholder="Product Name">
+      <input type="number" id="newPrice" placeholder="Price">
+      <button onclick="addProduct()">Add Product</button>
+      <table>
+        <thead><tr><th>Product</th><th>Price</th></tr></thead>
+        <tbody id="productTable"></tbody>
+      </table>
+
+      <h3>Customer Orders</h3>
+      <table>
+        <thead><tr><th>Customer</th><th>Items</th><th>Total</th><th>Date</th></tr></thead>
+        <tbody id="adminOrders"></tbody>
+      </table>
+    </div>
+
+    <div id="customerPanel" class="hidden">
+      <h3>Order Products</h3>
+      <table>
+        <thead><tr><th>Product</th><th>Price</th><th>Qty</th><th>Total</th></tr></thead>
+        <tbody id="orderTable"></tbody>
+      </table>
+      <p><strong>Past Due:</strong> ₹<span id="pastDue">0</span></p>
+      <p><strong>Order Total:</strong> ₹<span id="orderTotal">0</span></p>
+      <button onclick="placeOrder()">Place Order</button>
+    </div>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAdNnDlpyykZoLelkue4JcQ5bsyw4pO6z0",
+      authDomain: "business-app-7fb9f.firebaseapp.com",
+      projectId: "business-app-7fb9f",
+      storageBucket: "business-app-7fb9f.firebasestorage.app",
+      messagingSenderId: "272895648613",
+      appId: "1:272895648613:web:3650ac090f6d79d56cf78c"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    let userData = {};
+    let currentProducts = [];
+
+    window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', { size: 'normal' });
+
+    function sendOTP() {
+      const phone = document.getElementById('phoneInput').value;
+      auth.signInWithPhoneNumber('+91' + phone, window.recaptchaVerifier)
+        .then(confirmationResult => {
+          window.confirmationResult = confirmationResult;
+          document.getElementById('otpInput').classList.remove('hidden');
+          document.getElementById('verifyBtn').classList.remove('hidden');
+        }).catch(e => alert(e.message));
+    }
+
+    function verifyOTP() {
+      const otp = document.getElementById('otpInput').value;
+      confirmationResult.confirm(otp).then(result => {
+        const phone = result.user.phoneNumber;
+        userData.phone = phone;
+        document.getElementById('loginSection').classList.add('hidden');
+        document.getElementById('roleSection').classList.remove('hidden');
+      }).catch(e => alert("Invalid OTP"));
+    }
+
+    function selectRole(role) {
+      userData.role = role;
+      document.getElementById('roleSection').classList.add('hidden');
+      document.getElementById('unitJoinSection').classList.remove('hidden');
+    }
+
+    function joinUnit() {
+      const code = document.getElementById('unitCode').value.trim();
+      db.collection('units').where('code', '==', code).get().then(snapshot => {
+        if (!snapshot.empty) {
+          userData.unitId = snapshot.docs[0].id;
+          loadView();
+        } else alert("Unit not found");
+      });
+    }
+
+    function createUnit() {
+      const code = prompt("Enter a unit code (unique)");
+      db.collection('units').add({ code, createdBy: userData.phone }).then(doc => {
+        userData.unitId = doc.id;
+        loadView();
+      });
+    }
+
+    function loadView() {
+      if (userData.role === 'admin') {
+        document.getElementById('adminPanel').classList.remove('hidden');
+        loadProducts();
+        loadOrders();
+      } else {
+        document.getElementById('customerPanel').classList.remove('hidden');
+        loadOrderTable();
+      }
+    }
+
+    function addProduct() {
+      const name = document.getElementById('newProduct').value;
+      const price = parseInt(document.getElementById('newPrice').value);
+      db.collection('products').add({ name, price, unitId: userData.unitId });
+      document.getElementById('newProduct').value = '';
+      document.getElementById('newPrice').value = '';
+      loadProducts();
+    }
+
+    function loadProducts() {
+      db.collection('products').where('unitId', '==', userData.unitId).get().then(snapshot => {
+        const table = document.getElementById('productTable');
+        table.innerHTML = '';
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const row = `<tr><td>${data.name}</td><td>₹${data.price}</td></tr>`;
+          table.innerHTML += row;
+        });
+      });
+    }
+
+    function loadOrderTable() {
+      db.collection('products').where('unitId', '==', userData.unitId).get().then(snapshot => {
+        const table = document.getElementById('orderTable');
+        table.innerHTML = '';
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${data.name}</td>
+            <td>₹${data.price}</td>
+            <td><input type="number" min="0" value="0" onchange="updateTotal()" data-id="${doc.id}" data-name="${data.name}" data-price="${data.price}" class="qty-input"></td>
+            <td class="itemTotal">₹0</td>
+          `;
+          table.appendChild(row);
+        });
+      });
+    }
+
+    function updateTotal() {
+      let total = 0;
+      document.querySelectorAll('.qty-input').forEach(input => {
+        const qty = parseInt(input.value) || 0;
+        const price = parseInt(input.dataset.price);
+        const row = input.closest('tr');
+        const rowTotal = qty * price;
+        row.querySelector('.itemTotal').innerText = '₹' + rowTotal;
+        total += rowTotal;
+      });
+      document.getElementById('orderTotal').innerText = total;
+    }
+
+    function placeOrder() {
+      const items = [];
+      let total = 0;
+      document.querySelectorAll('.qty-input').forEach(input => {
+        const qty = parseInt(input.value);
+        if (qty > 0) {
+          const item = {
+            id: input.dataset.id,
+            name: input.dataset.name,
+            price: parseInt(input.dataset.price),
+            qty,
+            total: qty * parseInt(input.dataset.price)
+          };
+          items.push(item);
+          total += item.total;
+        }
+      });
+      if (items.length === 0) return alert("Select at least one product");
+      db.collection('orders').add({
+        phone: userData.phone,
+        unitId: userData.unitId,
+        items,
+        total,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      }).then(() => {
+        alert("Order placed successfully");
+        loadOrderTable();
+        document.getElementById('orderTotal').innerText = 0;
+      });
+    }
+
+    function loadOrders() {
+      db.collection('orders')
+        .where('unitId', '==', userData.unitId)
+        .orderBy('timestamp', 'desc')
+        .onSnapshot(snapshot => {
+          const table = document.getElementById('adminOrders');
+          table.innerHTML = '';
+
+          if (snapshot.empty) {
+            table.innerHTML = '<tr><td colspan="4">No orders yet</td></tr>';
+            return;
+          }
+
+          snapshot.forEach(doc => {
+            const data = doc.data();
+            if (!data.timestamp) return;
+            const row = `<tr>
+              <td>${data.phone}</td>
+              <td>${data.items.map(i => `${i.name} (${i.qty})`).join(', ')}</td>
+              <td>₹${data.total}</td>
+              <td>${data.timestamp.toDate().toLocaleString()}</td>
+            </tr>`;
+            table.innerHTML += row;
+          });
+        });
+    }
+  </script>
+</body>
+</html>
