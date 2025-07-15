@@ -51,7 +51,7 @@
     </div>
 
     <div id="adminPanel" class="hidden">
-      <h3>Admin Panel</h3>
+      <h3>Admin Panel (<span id="adminUnitId"></span>)</h3>
       <input type="text" id="newProduct" placeholder="Product Name">
       <input type="number" id="newPrice" placeholder="Price">
       <button onclick="addProduct()">Add Product</button>
@@ -128,6 +128,7 @@
       db.collection('units').where('code', '==', code).get().then(snapshot => {
         if (!snapshot.empty) {
           userData.unitId = snapshot.docs[0].id;
+          console.log("Joined Unit ID:", userData.unitId);
           loadView();
         } else alert("Unit not found");
       });
@@ -137,12 +138,16 @@
       const code = prompt("Enter a unit code (unique)");
       db.collection('units').add({ code, createdBy: userData.phone }).then(doc => {
         userData.unitId = doc.id;
+        console.log("Created Unit ID:", userData.unitId);
         loadView();
       });
     }
 
     function loadView() {
+      console.log("User role:", userData.role);
+      console.log("Loading view for unit:", userData.unitId);
       if (userData.role === 'admin') {
+        document.getElementById('adminUnitId').innerText = userData.unitId;
         document.getElementById('adminPanel').classList.remove('hidden');
         loadProducts();
         loadOrders();
@@ -236,6 +241,7 @@
     }
 
     function loadOrders() {
+      console.log("Fetching orders for unitId:", userData.unitId);
       db.collection('orders')
         .where('unitId', '==', userData.unitId)
         .orderBy('timestamp', 'desc')
@@ -250,6 +256,7 @@
 
           snapshot.forEach(doc => {
             const data = doc.data();
+            console.log("Order Data:", data);
             if (!data.timestamp) return;
             const row = `<tr>
               <td>${data.phone}</td>
