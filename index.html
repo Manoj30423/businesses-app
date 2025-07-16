@@ -256,16 +256,17 @@
 
           snapshot.forEach(doc => {
             const data = doc.data();
-            console.log("Order Data:", data);
-            if (!data.timestamp) return;
+            const timestamp = data.timestamp ? data.timestamp.toDate().toLocaleString() : '⏳ Pending...';
             const row = `<tr>
               <td>${data.phone}</td>
               <td>${data.items.map(i => `${i.name} (${i.qty})`).join(', ')}</td>
               <td>₹${data.total}</td>
-              <td>${data.timestamp.toDate().toLocaleString()}</td>
+              <td>${timestamp}</td>
             </tr>`;
             table.innerHTML += row;
           });
+        }, error => {
+          console.error("Error loading orders:", error);
         });
     }
   </script>
