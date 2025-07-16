@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Business App</title>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -21,14 +21,20 @@
 </head>
 <body>
   <div class="container">
-    <!-- Admin Panel Section -->
+    <div id="loginPanel">
+      <h2>Login</h2>
+      <input type="text" id="phoneInput" placeholder="Enter phone number">
+      <div id="recaptcha-container"></div>
+      <button onclick="sendOTP()">Send OTP</button>
+      <input type="text" id="otpInput" placeholder="Enter OTP" class="hidden">
+      <button onclick="verifyOTP()" class="hidden" id="verifyBtn">Verify OTP</button>
+    </div>
+
     <div id="adminPanel" class="hidden">
       <h3>Admin Panel (<span id="adminUnitId"></span>)</h3>
-
       <input type="text" id="newProduct" placeholder="Product Name">
       <input type="number" id="newPrice" placeholder="Price">
       <button onclick="addProduct()">Add Product</button>
-
       <table>
         <thead><tr><th>Product</th><th>Price</th></tr></thead>
         <tbody id="productTable"></tbody>
@@ -55,8 +61,46 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
 
-    let userData = { unitId: "" }; // TEMP for testing – in real use, assign on login
-    let currentProducts = [];
+    let userData = {};
+
+    window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', { size: 'normal' });
+
+    function sendOTP() {
+      const phoneNumber = "+91" + document.getElementById("phoneInput").value;
+      const appVerifier = window.recaptchaVerifier;
+      auth.signInWithPhoneNumber(phoneNumber, appVerifier)
+        .then((confirmationResult) => {
+          window.confirmationResult = confirmationResult;
+          document.getElementById("otpInput").classList.remove("hidden");
+          document.getElementById("verifyBtn").classList.remove("hidden");
+        }).catch((error) => {
+          alert("SMS not sent: " + error.message);
+        });
+    }
+
+    function verifyOTP() {
+      const code = document.getElementById("otpInput").value;
+      window.confirmationResult.confirm(code).then((result) => {
+        const user = result.user;
+        checkIfAdmin(user.phoneNumber);
+      }).catch((error) => {
+        alert("OTP verification failed: " + error.message);
+      });
+    }
+
+    function checkIfAdmin(phone) {
+      db.collection("admins").doc(phone).get().then(doc => {
+        if (doc.exists) {
+          userData.unitId = doc.data().unitId;
+          document.getElementById("loginPanel").classList.add("hidden");
+          document.getElementById("adminPanel").classList.remove("hidden");
+          document.getElementById("adminUnitId").innerText = userData.unitId;
+          loadOrders();
+        } else {
+          alert("You are not an admin");
+        }
+      });
+    }
 
     function loadOrders() {
       console.log("Fetching orders for unitId:", userData.unitId);
@@ -87,13 +131,17 @@
         });
     }
 
-    // For testing: simulate admin login and load
-    window.onload = () => {
-      userData.unitId = "your-unit-id"; // Replace with real unitId from your login logic
-      document.getElementById("adminUnitId").innerText = userData.unitId;
-      document.getElementById("adminPanel").classList.remove("hidden");
-      loadOrders();
-    };
+    function addProduct() {
+      const name = document.getElementById("newProduct").value;
+      const price = parseFloat(document.getElementById("newPrice").value);
+      if (!name || isNaN(price)) return alert("Enter valid product and price");
+      db.collection("products").add({ name, price, unitId: userData.unitId })
+        .then(() => {
+          alert("Product added");
+          document.getElementById("newProduct").value = "";
+          document.getElementById("newPrice").value = "";
+        });
+    }
   </script>
 </body>
 </html>
