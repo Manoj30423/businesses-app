@@ -1,228 +1,115 @@
-<!DOCTYPE html>
-<html lang="te">
-<head>
-<meta charset="UTF-8">
-<title>ఆర్డర్ & షాప్ యాప్</title>
-<style>
-body{font-family:"Noto Sans Telugu",Arial,sans-serif;background:#f5f5f5;margin:0;padding:20px;}
-h1,h2{color:#222;}
-.box{background:#fff;padding:15px;margin-bottom:10px;border-radius:8px;box-shadow:0 3px 8px rgba(0,0,0,0.1);}
-input,select{padding:6px;margin:5px 0;border:1px solid #ccc;border-radius:6px;width:95%;}
-button{padding:6px 12px;border-radius:6px;background:#007bff;color:white;border:none;cursor:pointer;margin-top:5px;}
-button:hover{background:#0056b3;}
-#login,#dashboard{max-width:700px;margin:auto;}
-.total{font-weight:bold;margin-top:10px;font-size:18px;color:#333;}
-</style>
-</head>
-<body>
+require('dotenv').config();
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const bodyParser = require("body-parser");
 
-<div id="login">
-<h1>📱 లాగిన్ / సైన్ అప్</h1>
-<input type="text" id="phone" placeholder="ఫోన్ నెంబర్"><br>
-<input type="text" id="name" placeholder="పేరు (సైన్ అప్ కోసం)"><br>
-<button onclick="signupLogin()">సైన్ అప్ / లాగిన్</button>
-</div>
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
 
-<div id="dashboard" style="display:none;">
-<h1 id="welcome"></h1>
+// Connect MongoDB
+mongoose.connect(process.env.MONGO_URI)
+.then(()=>console.log("MongoDB connected"))
+.catch(err=>console.log(err));
 
-<div id="adminPanel" style="display:none;">
-<h2>🏬 షాప్ & కస్టమర్లు</h2>
+// Schemas
+const userSchema = new mongoose.Schema({
+    phone: String,
+    name: String
+});
+const User = mongoose.model("User", userSchema);
 
-<div>
-<label>షాప్ పేరు:</label><input type="text" id="shopName">
-<button onclick="createShop()">షాప్ సృష్టించు</button>
-</div>
+const adminSchema = new mongoose.Schema({
+    userId: mongoose.Schema.Types.ObjectId,
+    shopName: String,
+    phoneNumber: String, // for WhatsApp
+    customerIds: [mongoose.Schema.Types.ObjectId]
+});
+const Admin = mongoose.model("Admin", adminSchema);
 
-<div>
-<h3>కస్టమర్ జోడించు</h3>
-<select id="userSelect"></select>
-<button onclick="addCustomer()">జోడించు</button>
-</div>
+const itemSchema = new mongoose.Schema({
+    adminId: mongoose.Schema.Types.ObjectId,
+    పేరు: String,
+    బరువు: String,
+    బ్యాగులు: Number,
+    ధర: Number,
+    get మొత్తం(){ return this.బ్యాగులు * this.ధర; }
+});
+const Item = mongoose.model("Item", itemSchema);
 
-<div>
-<h3>వస్తువులు</h3>
-<input placeholder="వస్తువు పేరు" id="itemName">
-<input placeholder="బరువు" id="itemWeight">
-<input type="number" placeholder="బ్యాగులు" id="itemBags">
-<input type="number" placeholder="ధర" id="itemPrice">
-<button onclick="addItem()">వస్తువు జోడించు</button>
-<div id="itemsList"></div>
-</div>
-
-<div>
-<h3>కస్టమర్లు</h3>
-<div id="customerList"></div>
-</div>
-</div>
-
-<div id="customerPanel" style="display:none;">
-<h2>🛒 మీ షాపులు</h2>
-<div id="shopsList"></div>
-<div id="shopItems"></div>
-</div>
-
-</div>
-
-<script>
-const API="http://localhost:5000"; // Replace with your backend if cloud
-let currentUser=null;
-let currentAdmin=null;
-
-// Signup/Login
-async function signupLogin(){
-let phone=document.getElementById("phone").value.trim();
-let name=document.getElementById("name").value.trim();
-if(!phone) return alert("ఫోన్ నెంబర్ ఇవ్వండి");
+// ===== Routes =====
 
 // Signup
-await fetch(API+"/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone,name})});
+app.post("/signup", async (req,res)=>{
+    const { phone, name } = req.body;
+    let user = await User.findOne({ phone });
+    if(!user){
+        user = new User({ phone, name });
+        await user.save();
+    }
+    res.json({ user });
+});
 
 // Login
-let loginRes=await fetch(API+"/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone})});
-let loginData=await loginRes.json();
-currentUser=loginData.user;
-
-document.getElementById("login").style.display="none";
-document.getElementById("dashboard").style.display="block";
-document.getElementById("welcome").innerText=`హలో, ${currentUser.name}`;
-
-if(loginData.admin){
-  currentAdmin=loginData.admin;
-  showAdminPanel();
-}else{
-  showCustomerPanel();
-}
-}
-
-// Admin Panel
-async function showAdminPanel(){
-document.getElementById("adminPanel").style.display="block";
-await loadUsersDropdown();
-loadItems();
-loadCustomers();
-}
-
-// Load Users Dropdown for Admin to pick customers
-async function loadUsersDropdown(){
-let res = await fetch(API+"/allUsers"); // Backend should provide /allUsers endpoint
-let users = await res.json();
-let select = document.getElementById("userSelect");
-select.innerHTML="";
-users.forEach(u=>{
-  if(u.id !== currentUser.id) select.innerHTML += `<option value="${u.id}">${u.name}</option>`;
+app.post("/login", async (req,res)=>{
+    const { phone } = req.body;
+    let user = await User.findOne({ phone });
+    if(!user) return res.status(404).json({msg:"User not found"});
+    let admin = await Admin.findOne({ userId: user._id });
+    res.json({ user, admin });
 });
-}
 
-// Create Shop
-async function createShop(){
-let shopName=document.getElementById("shopName").value.trim();
-if(!shopName) return alert("షాప్ పేరు ఇవ్వండి");
-let res=await fetch(API+"/admin/create",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:currentUser.id,shopName})});
-let data=await res.json();
-currentAdmin=data.admin;
-alert("షాప్ సృష్టించబడింది");
-showAdminPanel();
-}
+// All Users (for admin to pick customers)
+app.get("/allUsers", async (req,res)=>{
+    const users = await User.find();
+    res.json(users);
+});
 
-// Add Customer
-async function addCustomer(){
-let userId=document.getElementById("userSelect").value;
-if(!userId) return alert("కస్టమర్ ఎంపిక చేయండి");
-await fetch(API+"/admin/addCustomer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({adminId:currentAdmin.id,userId})});
-alert("కస్టమర్ జోడించబడింది");
-loadCustomers();
-}
+// Create Shop / Admin
+app.post("/admin/create", async (req,res)=>{
+    const { userId, shopName } = req.body;
+    let admin = new Admin({ userId, shopName, customerIds: [], phoneNumber: "" });
+    await admin.save();
+    res.json({ admin });
+});
+
+// Add Customer to Admin
+app.post("/admin/addCustomer", async (req,res)=>{
+    const { adminId, userId } = req.body;
+    let admin = await Admin.findById(adminId);
+    if(!admin.customerIds.includes(userId)) admin.customerIds.push(userId);
+    await admin.save();
+    res.json({ msg:"Customer added" });
+});
 
 // Add Item
-async function addItem(){
-let name=document.getElementById("itemName").value;
-let weight=document.getElementById("itemWeight").value;
-let bags=document.getElementById("itemBags").value;
-let price=document.getElementById("itemPrice").value;
-if(!name || !weight || !bags || !price) return alert("అన్ని ఫీల్డ్స్ పూర్తి చేయండి");
-let res=await fetch(`${API}/items/${currentAdmin.id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,weight,bags:Number(bags),price:Number(price)})});
-let data=await res.json();
-loadItems();
-}
-
-// Load Items
-async function loadItems(){
-let res=await fetch(`${API}/items/${currentAdmin.id}`);
-let items=await res.json();
-let container=document.getElementById("itemsList");
-container.innerHTML="";
-let total=0;
-items.forEach(i=>{
-total+=i["మొత్తం"];
-let div=document.createElement("div");
-div.className="box";
-div.innerHTML=`${i["పేరు"]} - ${i["బరువు"]} | ${i["బ్యాగులు"]} బ్యాగులు | ధర: ₹${i["ధర"]} | మొత్తం: ₹${i["మొత్తం"]}`;
-container.appendChild(div);
+app.post("/items/:adminId", async (req,res)=>{
+    const { name, weight, bags, price } = req.body;
+    const adminId = req.params.adminId;
+    const item = new Item({ adminId, పేరు:name, బరువు:weight, బ్యాగులు:bags, ధర:price });
+    await item.save();
+    res.json(item);
 });
-container.innerHTML+=`<div class="total">మొత్తం: ₹${total}</div>`;
-}
 
-// Load Customers
-async function loadCustomers(){
-let res=await fetch(`${API}/customers/${currentAdmin.id}`);
-let customers=await res.json();
-let container=document.getElementById("customerList");
-container.innerHTML="";
-customers.forEach(c=>{
-let div=document.createElement("div");
-div.className="box";
-div.innerText=c.name;
-container.appendChild(div);
+// Get Items by Admin
+app.get("/items/:adminId", async (req,res)=>{
+    const items = await Item.find({ adminId: req.params.adminId });
+    res.json(items);
 });
-}
 
-// Customer Panel
-async function showCustomerPanel(){
-document.getElementById("customerPanel").style.display="block";
-let res=await fetch(`${API}/myShops/${currentUser.id}`);
-let shops=await res.json();
-let container=document.getElementById("shopsList");
-container.innerHTML="";
-shops.forEach(s=>{
-let div=document.createElement("div");
-div.className="box";
-div.innerHTML=`${s.shopName} <button onclick="showShopItems(${s.id},'${s.shopName}', '${s.phoneNumber}')">ఆర్డర్ చూడండి</button>`;
-container.appendChild(div);
+// Get Customers of Admin
+app.get("/customers/:adminId", async (req,res)=>{
+    const admin = await Admin.findById(req.params.adminId).populate("customerIds");
+    res.json(admin.customerIds);
 });
-}
 
-async function showShopItems(adminId, shopName, adminPhone){
-let res=await fetch(`${API}/items/${adminId}`);
-let items=await res.json();
-let container=document.getElementById("shopItems");
-container.innerHTML="<h3>వస్తువులు</h3>";
-let total=0;
-let orderText=`మీరు ఆర్డర్ చేసారు:\nకస్టమర్: ${currentUser.name}\nషాప్: ${shopName}\nవస్తువులు:\n`;
-items.forEach(i=>{
-total+=i["మొత్తం"];
-let div=document.createElement("div");
-div.className="box";
-div.innerHTML=`${i["పేరు"]} - ${i["బరువు"]} | ${i["బ్యాగులు"]} బ్యాగులు | ధర: ₹${i["ధర"]} | మొత్తం: ₹${i["మొత్తం"]}`;
-container.appendChild(div);
-orderText += `- ${i["పేరు"]}: ${i["బ్యాగులు"]} బ్యాగులు\n`;
+// Get Shops for Customer
+app.get("/myShops/:userId", async (req,res)=>{
+    const admins = await Admin.find({ customerIds: req.params.userId });
+    res.json(admins);
 });
-orderText += `మొత్తం: ₹${total}\n`;
 
-let orderBtn = document.createElement("button");
-orderBtn.innerText="WhatsApp ద్వారా ఆర్డర్ చేయు";
-orderBtn.onclick=()=>openWhatsApp(adminPhone, orderText);
-container.appendChild(orderBtn);
-container.innerHTML+=`<div class="total">మొత్తం: ₹${total}</div>`;
-}
-
-function openWhatsApp(adminNumber, orderText){
-const encodedText = encodeURIComponent(orderText);
-const url = `https://wa.me/${adminNumber}?text=${encodedText}`;
-window.open(url,"_blank");
-}
-</script>
-
-</body>
-</html>
-
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, ()=>console.log(`Server running on port ${PORT}`));
